@@ -90,3 +90,23 @@ MEMORY/                项目记忆（本目录）
 - MSVC：VS Build Tools 2022 装在 `D:\SpaceDev\Env\Infrastructure\runtime\msvc\BuildTools`（Windows SDK 在 C 盘）。
 - cargo 源：`%CARGO_HOME%\config.toml` 用清华 http 稀疏索引 + 关闭多路复用；crates 本体由 `scripts/fetch-crates.sh` 用 curl 预下载。
 - 远程仓库：`git@github.com:wfql1024/vibe-diary.git`（分支 main）。
+## 本机环境与个人数据（不外发，只记在这）
+
+### 工具链位置
+
+- `RUSTUP_HOME=D:\SpaceDev\Env\Infrastructure\runtime\rust\rustup`；`CARGO_HOME=D:\SpaceDev\Env\Infrastructure\runtime\rust\cargo`；`cargo\bin` 已在用户 PATH。
+- MSVC：VS Build Tools 2022 在 `D:\SpaceDev\Env\Infrastructure\runtime\msvc\BuildTools`（Windows SDK 落在 C 盘）。
+- 项目位置：`E:\SpaceDev\Projects\Mine\vibe-diary`；远程 `git@github.com:wfql1024/vibe-diary.git`。
+
+### 网络方案（本机实测）
+
+- rustup：直连 `static.rust-lang.org` 约 45 KB/s → 改用 `RUSTUP_DIST_SERVER=http://mirrors.tuna.tsinghua.edu.cn/rustup`（https 不通，http 20+ MB/s）。曾超时中断导致 `missing manifest`，需 `rustup toolchain uninstall` 后重装。
+- cargo 索引：`index.crates.io` 的 TLS 会被重置（curl 正常）→ `%CARGO_HOME%\config.toml` 换清华 http 稀疏索引 + `multiplexing = false`。
+- crate 本体：`static.crates.io` 对 cargo 仍会被重置 → `bash scripts/fetch-crates.sh` 用 curl 预下载到 cargo 缓存，再 `cargo build --offline`。新增依赖后要重跑。
+- VS Code：`settings.json` 的 `terminal.integrated.env.windows` 与 `tasks.json` 的 `env` 里显式注入 `RUSTUP_HOME / CARGO_HOME / PATH`（VS Code 进程可能持有旧快照）。
+
+### 参考数据（个人，勿外发）
+
+- 来源：`E:\Now\OneDrive\文档\LocalDocuments\main\日历日程表-导出.json`（按天导出的日程/日记）。脚本默认读仓库内 `data/diary-export.json`（`data/` 已 gitignore），或 `--path` 指定。
+- 规模：1847 条记录，覆盖 2025 全年 365 天，单日最多 10 条；导入后 44 个标签、1867 条 entry_tags、关系由人工在画布建（现有 41 条）。
+- 字段：sheet（月份）/ week / date / weekday / isoWeek / text / done / row / cell。

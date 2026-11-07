@@ -12,7 +12,7 @@
 ```bash
 pnpm tauri dev                 # 开发：Vite :1420 + 原生窗口
 pnpm build                     # 只构建前端（tsc 类型检查 + vite build）——改完前端必跑
-node scripts/import-json.mjs --dry-run     # 参考 JSON 导入（--reset / --with-links）
+node scripts/import-json.mjs --path <导出.json> --dry-run   # 导入（另有 --reset / --with-links）
 node .vscode/db-stat.cjs       # 直连库看记录/标签/关系条数（VS Code 任务 db: 统计）
 bash scripts/fetch-crates.sh   # 新增 Rust 依赖后，先预下载 crates 再 cargo build --offline
 ```
@@ -25,7 +25,7 @@ bash scripts/fetch-crates.sh   # 新增 Rust 依赖后，先预下载 crates 再
 - **`tag_links` 是有向的**：插入/删除/合并都保留原方向，不要排序去重（那是 v1 的 bug，见 `lessons.md` L3）。
 - **拼 SQL 占位符必须带 `$`**（`$1..$n`）：漏掉会被 SQLite 当字面量，静默返回错误数据（`lessons.md` L1）。
 - **改完代码要看改后原文**：用脚本/模板串生成替换文本时，`$` 和反引号容易被吞（`lessons.md` L2）。
-- **Rust 环境三件套**：`RUSTUP_HOME` / `CARGO_HOME` 指向 `D:\SpaceDev\Env\Infrastructure\runtime\rust\*`；cargo 走清华 http 镜像；新增依赖先跑 `fetch-crates.sh`。
+- **Rust 环境**：`RUSTUP_HOME` / `CARGO_HOME` 指向本机独立目录（具体路径见 `MEMORY/facts.md`），cargo 走镜像源；新增 Rust 依赖后先跑 `scripts/fetch-crates.sh` 再 `cargo build --offline`。
 
 ## 验证纪律
 
