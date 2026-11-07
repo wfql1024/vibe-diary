@@ -12,8 +12,8 @@ dist
 dist-ssr
 *.local
 
-# 临时文件 / 本地试跑数据
-tmp/
+# 临时文件 / 本地试跑数据（只忽略仓库根的 tmp/）
+/tmp/
 data/
 *.db
 *.db-journal
@@ -34,3 +34,5 @@ data/
 *.njsproj
 *.sln
 *.sw?
+# 记忆素材卡只在本地留存（含个人数据，不发布）
+MEMORY/tmp/
