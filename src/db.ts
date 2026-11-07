@@ -78,7 +78,7 @@ export function tagCountLabel(tag: Pick<Tag, "usage" | "reach">): { main: string
 
 /**
  * 标签名 → id 集合（含传递地指向它的标签）。先按精确名匹配，找不到才按"包含"匹配，
- * 这样 tag:暖暖 的结果与侧栏「暖暖 334(156+178)」的 334 完全一致，不会误把 (元崽)暖暖 等算进来。
+ * 这样 tag:X 的结果与侧栏「X 总数(自身+外部)」里的总数完全一致，不会把名字相近的其它标签也算进来。
  */
 async function reachableTagIds(name: string): Promise<number[]> {
   const database = await db();

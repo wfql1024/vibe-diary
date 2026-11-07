@@ -15,7 +15,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 
-const DEFAULT_JSON = 'E:/Now/OneDrive/文档/LocalDocuments/main/日历日程表-导出.json';
+// 默认读仓库内 data/ 下的导出文件（data/ 已 gitignore）；也可以用 --path 指定任意路径
+const DEFAULT_JSON = path.join(process.cwd(), 'data', 'diary-export.json');
 const DEFAULT_DB = path.join(
   process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
   'com.peekode.vibeDiary',
@@ -32,7 +33,7 @@ function parseArgs(argv) {
   const args = { json: DEFAULT_JSON, db: DEFAULT_DB, dryRun: false, reset: false, withLinks: false };
   for (let i = 0; i < argv.length; i += 1) {
     const key = argv[i];
-    if (key === '--json') args.json = argv[++i];
+    if (key === '--json' || key === '--path') args.json = argv[++i];
     else if (key === '--db') args.db = argv[++i];
     else if (key === '--dry-run') args.dryRun = true;
     else if (key === '--reset') args.reset = true;
@@ -77,7 +78,7 @@ function colorFor(name) {
 function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!fs.existsSync(args.json)) {
-    console.error('找不到 JSON 文件: ' + args.json);
+    console.error('找不到 JSON 文件: ' + args.json + '\n用 --path <文件> 指定路径，或把导出文件放到 data/diary-export.json');
     process.exit(1);
   }
   const raw = JSON.parse(fs.readFileSync(args.json, 'utf8'));

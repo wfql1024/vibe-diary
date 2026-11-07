@@ -171,7 +171,7 @@ function App() {
               <input
                 className="search"
                 value={query}
-                placeholder='搜索… 点标签会插入 tag:名称，例：tag:暖暖 文字'
+                placeholder='搜索… 点标签会插入 tag:名称，例：tag:标签名 文字'
                 onChange={(event) => {
                   setQuery(event.currentTarget.value);
                   void refresh(event.currentTarget.value);
