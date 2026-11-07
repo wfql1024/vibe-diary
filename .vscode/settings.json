@@ -1,0 +1,23 @@
+{
+  "files.eol": "\n",
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/dist/**": true,
+    "**/src-tauri/target/**": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/src-tauri/target": true,
+    "**/pnpm-lock.yaml": true,
+    "**/Cargo.lock": true
+  },
+  "rust-analyzer.files.excludeDirs": ["src-tauri/target"],
+  "typescript.tsdk": "node_modules/typescript/lib",
+
+  "terminal.integrated.env.windows": {
+    "RUSTUP_HOME": "D:\\SpaceDev\\Env\\Infrastructure\\runtime\\rust\\rustup",
+    "CARGO_HOME": "D:\\SpaceDev\\Env\\Infrastructure\\runtime\\rust\\cargo",
+    "PATH": "D:\\SpaceDev\\Env\\Infrastructure\\runtime\\rust\\cargo\\bin;${env:PATH}"
+  }
+}

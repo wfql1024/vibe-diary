@@ -1,0 +1,63 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "tauri: dev",
+      "type": "shell",
+      "command": "pnpm tauri dev",
+      "isBackground": true,
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "RUSTUP_HOME": "D:\\SpaceDev\\Env\\Infrastructure\\runtime\\rust\\rustup",
+          "CARGO_HOME": "D:\\SpaceDev\\Env\\Infrastructure\\runtime\\rust\\cargo",
+          "PATH": "D:\\SpaceDev\\Env\\Infrastructure\\runtime\\rust\\cargo\\bin;${env:PATH}",
+          "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS": "--remote-debugging-port=9222"
+        }
+      },
+      "problemMatcher": {
+        "owner": "tauri",
+        "pattern": {
+          "regexp": "^$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*(VITE|vite|Compiling|Finished|Running).*",
+          "endsPattern": ".*(Running .target|Local:.*1420|ready in).*"
+        }
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "tauri: build",
+      "type": "shell",
+      "command": "pnpm tauri build",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "RUSTUP_HOME": "D:\\SpaceDev\\Env\\Infrastructure\\runtime\\rust\\rustup",
+          "CARGO_HOME": "D:\\SpaceDev\\Env\\Infrastructure\\runtime\\rust\\cargo",
+          "PATH": "D:\\SpaceDev\\Env\\Infrastructure\\runtime\\rust\\cargo\\bin;${env:PATH}"
+        }
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "web: build",
+      "type": "shell",
+      "command": "pnpm build",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "db: 统计",
+      "type": "shell",
+      "command": "node .vscode/db-stat.cjs",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    }
+  ]
+}

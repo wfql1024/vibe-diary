@@ -1,0 +1,21 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "▶ 启动 vibe-diary（终端模式，无断点）",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "pnpm tauri dev",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "🐞 前端断点调试（WebView2 :9222）",
+      "type": "msedge",
+      "request": "attach",
+      "port": 9222,
+      "webRoot": "${workspaceFolder}/src",
+      "timeout": 90000,
+      "preLaunchTask": "tauri: dev"
+    }
+  ]
+}
