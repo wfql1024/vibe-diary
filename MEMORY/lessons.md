@@ -73,3 +73,63 @@
 
 - 标签关系是无限制传递闭包：长链可能让"搜具体标签"带出过多记录（如 `娱乐` 达 1046 条）。若要收敛，可加"最多穿透 N 跳"。
 - `pnpm tauri build`（release 打包）未验证过，首次需要下载 NSIS/WiX。
+
+## L11 · helper 定义在 useMemo 之后 = 渲染期 TDZ（整页空白）
+- 症状：构建通过但打开应用整页空白，console 报 `Cannot access X before initialization`。
+- 根因：`const radiusFor = ...` 定义在用到它的 `useMemo` 之后；tsc / vite build 都不查渲染期。
+- 修法：被 hook 回调引用的 helper 一律放在所有 `useMemo` 之前。
+- 预防：改组件后跑 `node scripts/smoke-render.mjs`。
+
+## L12 · 迁移里重建表会顺手删掉子表数据（2026-11-12）
+
+- 症状：迁移 005 之后，entries 记录还在、tags / tag_links 也在，但 entry_tags 变成 **0 行** —— 界面上所有标签（列表 / 周视图 / 右栏）全部消失。
+- 根因：005 为了去掉 date 的 NOT NULL 约束用了「建新表 → 复制 → DROP TABLE entries → RENAME」。entry_tags 对 entries(id) 是 ON DELETE CASCADE，而迁移脚本里的 PRAGMA foreign_keys = OFF **在事务内不生效**（sqlx 把整个迁移包在一个事务里），于是 DROP 触发级联删除。
+- 修法（下次重建表必须这么做）：
+  1. 先把子表数据复制到临时表：CREATE TEMP TABLE et_backup AS SELECT * FROM entry_tags;
+  2. DROP TABLE entries; ALTER TABLE entries_new RENAME TO entries;
+  3. 再灌回去：INSERT OR IGNORE INTO entry_tags SELECT * FROM et_backup;
+  4. 或者干脆不重建表：加新列、用空串语义表示未完成，避免动结构。
+- 预防：凡是「重建表」的迁移，必须同时备份所有指向它的子表（本项目：entry_tags），并在迁移末尾校验行数。
+
+## L13 · 全局按钮「黑名单」规则会一直漏
+- 症状：新加的日历格子、切换条、筛选项全变成蓝底。
+- 根因：`button:not(.ghost):not(.danger):not(.chip):not(.tabs button)` 这种"排除法"永远漏。
+- 修法：改成**显式** `button.primary` 才是蓝底，其余走基础白底样式。
+
+## L14 · 给几百个单元格逐个绑事件 + 每次渲染重建矩阵 = 拖窗口就卡
+- 症状：改窗口尺寸时明显卡顿。
+- 根因：年视图 12×42 个 `<button>` 各带 onClick，且每次渲染重新 `monthMatrix()`（造 504 个 Date）。
+- 修法：容器级事件委托（`data-day` / `data-heat-day` / `data-month`）+ `useMemo` 缓存矩阵 + 模块级色阶常量 + `memo()` + `content-visibility:auto`。
+
+## L15 · 对象字面量 prop 会废掉 memo
+- 症状：日历明明 memo 了还是每次父组件渲染都重画。
+- 根因：`filter={{...}}` 每次都是新对象。
+- 修法：`useMemo` 固定对象、`useCallback` 固定回调。
+
+## L16 · 同名 ref 冲突：`stateRef` 已被 RelaxState 占用
+- 症状：TS 报"无法重新声明块级变量"，改完布局又报 `center does not exist on type RelaxState`。
+- 根因：新加的视口状态复用了 `stateRef`。
+- 修法：新状态换名 `viewRef`，并把相关读写一起改干净。
+
+## L17 · 用 `indexOf("  return (")` 切文件会误伤缩进的 `return (`
+- 症状：脚本"重写 return 之后的内容"把 effect 的 `return () => {...}` 一起截掉，文件语法崩。
+- 根因：子串匹配不带行首锚点。
+- 修法：带换行匹配（`"\n  return ("`）或按行号 splice，改完立刻看片段。
+
+## L18 · 改了 CSS 却没落盘
+- 症状：加了 `.filter-pop{position:absolute}` 但界面还在挤占布局。
+- 根因：一次 `write` 静默失败（Windows 文件被占用），我只看了脚本输出的"已完成"。
+- 修法/预防：写完 `grep` 验证关键选择器真的在文件里；同一选择器不要留两份定义。
+
+## L19 · `window.confirm` 只能二选一
+- 症状：逾期完成需要"按当前 / 按截止 / 干脆不完成"三选一，浏览器 confirm 做不到。
+- 修法：自研 `ConfirmDialog`（标题 + 说明 + 任意个选项 + 取消）。
+
+## L20 · 改列之后要全局搜一遍旧列
+- 症状：合并字段后日历一直"载入中"。
+- 根因：`dailyCompletedCounts` 还在用已删除的 `completed_at`，SQL 报错；同时 `listEntriesBetween` 的区间条件少了 `$`。
+- 修法：查询层统一 try/catch/finally 收尾（出错显示"加载失败"而不是永远转圈）；改列后 `grep` 旧列名。
+
+## L21 · 同类输入控件第二次出现就该抽组件
+- 症状：标签输入在记录弹窗和批量修改里各写一遍；更早的主题筛选面板因为只改了一处仍是蓝底。
+- 修法/预防：抽 `TagTokenInput` / `FilterPanel`，只留一份实现与一份解析口径（`parseTagText`）。
