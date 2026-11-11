@@ -105,7 +105,7 @@ export default function TagManager({ tags, onClose, onChanged }: Props) {
             placeholder="新标签名称"
             onChange={(event) => setNewName(event.currentTarget.value)}
           />
-          <button type="submit">添加</button>
+          <button type="submit" className="primary">添加</button>
         </form>
 
         {error && <p className="error-inline">{error}</p>}
@@ -118,7 +118,7 @@ export default function TagManager({ tags, onClose, onChanged }: Props) {
               合并后这些记录的标签引用会全部改为「{merge.targetName}」，原标签删除。
             </p>
             <div className="row-actions">
-              <button type="button" onClick={confirmMerge}>
+              <button type="button" className="primary" onClick={confirmMerge}>
                 合并
               </button>
               <button type="button" className="ghost" onClick={() => setMerge(null)}>
@@ -160,7 +160,7 @@ export default function TagManager({ tags, onClose, onChanged }: Props) {
                       if (event.key === "Escape") setEditing(null);
                     }}
                   />
-                  <button type="button" onClick={() => void handleRename(tag, editing.name)}>
+                  <button type="button" className="primary" onClick={() => void handleRename(tag, editing.name)}>
                     确定
                   </button>
                   <button type="button" className="ghost" onClick={() => setEditing(null)}>

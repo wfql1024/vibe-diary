@@ -10,9 +10,18 @@ export interface EntryRow {
   title: string;
   content: string;
   status: EntryStatus;
-  date: string;
+  /** 唯一的日期时间：既是日记日期也是完成时间（YYYY-MM-DD 或 YYYY-MM-DDTHH:mm）；null = 未完成 */
+  date: string | null;
   created_at: string;
   updated_at: string;
+  /** 置顶：0/1 */
+  pinned: number;
+  /** 周期规则：'' | daily | workday | weekly | monthly | yearly | 自定义 */
+  repeat_rule: string;
+  /** 截止时间：YYYY-MM-DD 或 YYYY-MM-DDTHH:mm */
+  due_at: string | null;
+  /** 提醒时间 */
+  remind_at: string | null;
 }
 
 export interface Tag {
@@ -109,41 +118,75 @@ async function reachableTagIds(name: string): Promise<number[]> {
   return rows.map((row) => Number(row.id));
 }
 
+/** 主题 = 标题里第一个「：」之前的部分；没有冒号就整条标题 */
+export const THEME_SQL =
+  "COALESCE(TRIM(CASE WHEN INSTR(e.title, '：') > 0 THEN SUBSTR(e.title, 1, INSTR(e.title, '：') - 1) " +
+  "WHEN INSTR(e.title, ':') > 0 THEN SUBSTR(e.title, 1, INSTR(e.title, ':') - 1) ELSE e.title END), '')";
+
+/** 筛选条件（与 EntrySearch 同构，供日历/明细等处引用） */
+export type EntryFilter = EntrySearch;
+
 export interface EntrySearch {
-  /** 自由文字：匹配正文 / 标题 / 日期 / 标签名（标签名走传递闭包） */
+  /** 自由文字：匹配正文，以及"没有被筛选接管"的那几个维度 */
   text?: string;
-  /** tag:xxx 过滤，多个之间是"同时具备" */
-  tags?: string[];
+  /** 选中的标签（同时具备，按传递闭包扩展） */
+  includeTags?: string[];
+  /** 排除的标签 */
+  excludeTags?: string[];
+  /** 选中的主题 */
+  includeThemes?: string[];
+  /** 排除的主题 */
+  excludeThemes?: string[];
   limit?: number;
+  /** 分页偏移 */
+  offset?: number;
 }
 
 /**
- * 记录检索。文字条件与每个 tag: 条件都是 AND；每个 tag: 内部按传递闭包扩展，
- * 所以 A→B 时用 tag:B 也能查到只打了 A 的记录。
+ * 记录检索。
+ * - 标签/主题筛选是 AND；每个标签内部按传递闭包扩展（A→B 时筛 B 也能查到只打了 A 的）。
+ * - 自由文字与筛选之间也是 AND，但**文字不再去匹配已被筛选接管的维度**：
+ *   标签筛选生效时文字只匹配正文/主题；主题筛选生效时文字只匹配正文/标签；两者都生效只匹配正文。
  */
-export async function searchEntries(query: EntrySearch = {}): Promise<EntryRow[]> {
-  const database = await db();
-  const limit = query.limit ?? 300;
+const ENTRY_COLUMNS =
+  "e.id, e.title, e.content, e.status, e.date, e.created_at, e.updated_at, e.pinned, e.repeat_rule, e.due_at, e.remind_at";
+
+/** 把筛选条件编译成 SQL 片段；searchEntries / 区间查询 / 热力图共用这一份 */
+async function buildFilterSql(query: EntrySearch) {
   const text = (query.text ?? "").trim();
+  const includeTags = query.includeTags ?? [];
+  const excludeTags = query.excludeTags ?? [];
+  const includeThemes = query.includeThemes ?? [];
+  const excludeThemes = query.excludeThemes ?? [];
+  const tagsActive = includeTags.length + excludeTags.length > 0;
+  const themesActive = includeThemes.length + excludeThemes.length > 0;
+
   const params: (string | number)[] = [];
   const conditions: string[] = [];
   let cte = "";
 
-  if (text) {
-    params.push(`%${text}%`);
-    const ph = `$${params.length}`;
+  if (text || includeTags.length > 0) {
+    const likeParam = text ? `%${text}%` : null;
+    if (likeParam !== null) params.push(likeParam);
+    const likePh = likeParam !== null ? `$${params.length}` : "";
     cte = `WITH RECURSIVE matched(id) AS (
-      SELECT id FROM tags WHERE name LIKE ${ph}
+      SELECT id FROM tags WHERE name LIKE ${likePh || "'%'"}
       UNION
       SELECT l.source_tag_id FROM tag_links l JOIN matched m ON m.id = l.target_tag_id
     )`;
-    conditions.push(
-      `(e.content LIKE ${ph} OR e.title LIKE ${ph} OR e.date LIKE ${ph}` +
-        ` OR EXISTS (SELECT 1 FROM entry_tags et WHERE et.entry_id = e.id AND et.tag_id IN (SELECT id FROM matched)))`,
-    );
+    if (text) {
+      const parts = ["e.content LIKE " + likePh];
+      if (!themesActive) parts.push("e.title LIKE " + likePh);
+      if (!tagsActive) {
+        parts.push(
+          "EXISTS (SELECT 1 FROM entry_tags et WHERE et.entry_id = e.id AND et.tag_id IN (SELECT id FROM matched))",
+        );
+      }
+      conditions.push("(" + parts.join(" OR ") + ")");
+    }
   }
 
-  for (const name of query.tags ?? []) {
+  for (const name of includeTags) {
     const ids = await reachableTagIds(name);
     if (ids.length === 0) {
       conditions.push("0");
@@ -160,18 +203,58 @@ export async function searchEntries(query: EntrySearch = {}): Promise<EntryRow[]
     );
   }
 
-  params.push(limit);
-  const limitPlaceholder = `$${params.length}`;
+  for (const name of excludeTags) {
+    const ids = await reachableTagIds(name);
+    if (ids.length === 0) continue;
+    const placeholders = ids
+      .map((id) => {
+        params.push(id);
+        return `$${params.length}`;
+      })
+      .join(", ");
+    conditions.push(
+      `NOT EXISTS (SELECT 1 FROM entry_tags et WHERE et.entry_id = e.id AND et.tag_id IN (${placeholders}))`,
+    );
+  }
+
+  for (const theme of includeThemes) {
+    params.push(theme);
+    conditions.push(`${THEME_SQL} = $${params.length}`);
+  }
+
+  for (const theme of excludeThemes) {
+    params.push(theme);
+    conditions.push(`${THEME_SQL} <> $${params.length}`);
+  }
+
+  return { cte, conditions, params };
+}
+
+export async function searchEntries(query: EntrySearch = {}): Promise<EntryRow[]> {
+  const database = await db();
+  const limit = query.limit ?? 300;
+  const offset = query.offset ?? 0;
+  const { cte, conditions, params } = await buildFilterSql(query);
+  params.push(limit, offset);
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   return database.select<EntryRow[]>(
     `${cte}
-     SELECT e.id, e.title, e.content, e.status, e.date, e.created_at, e.updated_at
+     SELECT ${ENTRY_COLUMNS}
        FROM entries e
        ${where}
-      ORDER BY e.date DESC, e.id DESC
-      LIMIT ${limitPlaceholder}`,
+      ORDER BY (e.date IS NULL) DESC, e.date DESC, e.id DESC
+      LIMIT $${params.length - 1} OFFSET $${params.length}`,
     params,
   );
+}
+
+/** 同一套筛选条件下的总条数（分页用） */
+export async function countEntries(query: EntrySearch = {}): Promise<number> {
+  const database = await db();
+  const { cte, conditions, params } = await buildFilterSql(query);
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const rows = await database.select<{ n: number }[]>(`${cte} SELECT COUNT(*) AS n FROM entries e ${where}`, params);
+  return Number(rows[0]?.n ?? 0);
 }
 
 /** 一次取回这批记录的所有标签，避免 N+1 查询 */
@@ -196,19 +279,40 @@ export async function tagsForEntries(entryIds: number[]): Promise<Map<number, Ta
 }
 
 export async function createEntry(input: {
-  date: string;
+  /** 唯一的日期时间；null = 未完成 */
+  date: string | null;
   content: string;
+  /** 主题/标题；留空时取正文第一行 */
+  title?: string;
   status?: EntryStatus;
   tags?: string[];
+  /** 置顶 */
+  pinned?: boolean;
+  /** 周期：'' | daily | workday | weekly | monthly | yearly | 自定义文本 */
+  repeatRule?: string;
+  /** 截止：YYYY-MM-DD 或 YYYY-MM-DDTHH:mm */
+  dueAt?: string | null;
+  /** 提醒：同上 */
+  remindAt?: string | null;
 }): Promise<number> {
   const database = await db();
   const content = input.content.trim();
   if (!content) throw new Error("内容不能为空");
-  const title = content.split(/[\n；;。]/)[0].slice(0, 40);
+  const custom = (input.title ?? "").trim();
+  const title = custom || content.split(/[\n；;。]/)[0].slice(0, 40);
 
   const result = await database.execute(
-    "INSERT INTO entries (title, content, status, date) VALUES ($1, $2, $3, $4)",
-    [title, content, input.status ?? "completed", input.date],
+    "INSERT INTO entries (title, content, status, date, pinned, repeat_rule, due_at, remind_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+    [
+      title,
+      content,
+      input.date ? "completed" : "pending",
+      input.date,
+      input.pinned ? 1 : 0,
+      input.repeatRule ?? "",
+      input.dueAt ?? null,
+      input.remindAt ?? null,
+    ],
   );
   const entryId = Number(result.lastInsertId);
   for (const name of input.tags ?? []) {
@@ -381,4 +485,267 @@ export function today(): string {
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+
+/* ---------------- 待办 / 完成状态 ---------------- */
+
+/** 把 "YYYY-MM-DD" 或 "YYYY-MM-DDTHH:mm" 解析成本地时间；只有日期的按当天 23:59 算 */
+function parseMoment(value: string | null): Date | null {
+  if (!value) return null;
+  const text = value.includes("T") ? value : value + "T23:59";
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** 只取日期部分（YYYY-MM-DD），未完成返回 null */
+export function dayOf(row: { date: string | null }): string | null {
+  return row.date ? row.date.slice(0, 10) : null;
+}
+
+/** 逾期：已完成看「完成时间(date) > 截止时间」，未完成看「现在 > 截止时间」 */
+export function isOverdue(row: { date: string | null; due_at: string | null }, now = new Date()): boolean {
+  const due = parseMoment(row.due_at);
+  if (!due) return false;
+  const done = parseMoment(row.date);
+  if (done) return done.getTime() > due.getTime();
+  return now.getTime() > due.getTime();
+}
+
+/** 勾选 / 取消勾选：写或清完成时间，并同步 status 列 */
+export async function setEntryDate(entryId: number, value: string | null): Promise<void> {
+  const database = await db();
+  await database.execute("UPDATE entries SET date = $1, status = $2 WHERE id = $3", [
+    value,
+    value ? "completed" : "pending",
+    entryId,
+  ]);
+}
+
+
+/** 只改截止时间（取消勾选且原本没有截止时用） */
+export async function setEntryDue(entryId: number, dueAt: string | null): Promise<void> {
+  const database = await db();
+  await database.execute("UPDATE entries SET due_at = $1 WHERE id = $2", [dueAt, entryId]);
+}
+
+/** 本地时间 → "YYYY-MM-DDTHH:mm" */
+export function momentKey(date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    date.getFullYear() +
+    "-" +
+    pad(date.getMonth() + 1) +
+    "-" +
+    pad(date.getDate()) +
+    "T" +
+    pad(date.getHours()) +
+    ":" +
+    pad(date.getMinutes())
+  );
+}
+
+/** 展示用：只有日期就显示日期，带时间就显示 日期 时:分 */
+export function momentLabel(value: string | null): string {
+  if (!value) return "";
+  const [day, time] = value.split("T");
+  return time ? day + " " + time : day;
+}
+
+/** 未完成、但截止时间落在区间内的记录（日历上按截止日"预告"显示） */
+export async function listPendingDueBetween(from: string, to: string): Promise<EntryRow[]> {
+  const database = await db();
+  return database.select<EntryRow[]>(
+    "SELECT " + ENTRY_COLUMNS + " FROM entries e" +
+      " WHERE e.date IS NULL AND e.due_at IS NOT NULL" +
+      " AND substr(e.due_at, 1, 10) >= $1 AND substr(e.due_at, 1, 10) <= $2" +
+      " ORDER BY e.due_at, e.id",
+    [from, to],
+  );
+}
+
+/** 所有未完成的事项（不限日期），有截止的排在前面 */
+export async function listPendingEntries(): Promise<EntryRow[]> {
+  const database = await db();
+  return database.select<EntryRow[]>(
+    "SELECT " + ENTRY_COLUMNS + " FROM entries e WHERE e.date IS NULL" +
+      " ORDER BY (e.due_at IS NULL), e.due_at, e.created_at DESC, e.id DESC",
+  );
+}
+
+/* ---------------- 日历视图 ---------------- */
+
+/** 取某个日期区间的记录（含首尾），支持与搜索同一套筛选；用于周/月视图与右侧当天明细 */
+export async function listEntriesBetween(
+  from: string,
+  to: string,
+  query: EntrySearch = {},
+): Promise<EntryRow[]> {
+  const database = await db();
+  const { cte, conditions, params } = await buildFilterSql(query);
+  params.push(from, to);
+  conditions.push(`substr(e.date, 1, 10) >= $${params.length - 1}`, `substr(e.date, 1, 10) <= $${params.length}`);
+  const where = `WHERE ${conditions.join(" AND ")}`;
+  return database.select<EntryRow[]>(
+    `${cte} SELECT ${ENTRY_COLUMNS} FROM entries e ${where} ORDER BY e.date, e.id`,
+    params,
+  );
+}
+
+/** 某个日期区间里「每天完成了多少条」，同样支持筛选；返回 date → 数量 */
+export async function dailyCompletedCounts(
+  from: string,
+  to: string,
+  query: EntrySearch = {},
+): Promise<Map<string, number>> {
+  const database = await db();
+  const { cte, conditions, params } = await buildFilterSql(query);
+  params.push(from, to);
+  conditions.push(`substr(e.date, 1, 10) >= $${params.length - 1}`, `substr(e.date, 1, 10) <= $${params.length}`, "e.date IS NOT NULL");
+  const where = `WHERE ${conditions.join(" AND ")}`;
+  const rows = await database.select<{ date: string; n: number }[]>(
+    `${cte} SELECT substr(e.date, 1, 10) AS date, COUNT(*) AS n FROM entries e ${where} GROUP BY substr(e.date, 1, 10)`,
+    params,
+  );
+  return new Map(rows.map((row) => [row.date, Number(row.n)]));
+}
+
+export interface BatchPatch {
+  /** 完成时间；undefined = 不改，null = 改成未完成 */
+  date?: string | null;
+  /** 置顶；undefined = 不改 */
+  pinned?: boolean;
+  /** 截止；undefined = 不改，null = 清空 */
+  dueAt?: string | null;
+  /** 提醒；undefined = 不改，null = 清空 */
+  remindAt?: string | null;
+  /** 追加标签 */
+  addTags?: string[];
+  /** 覆盖正文（留空字符串 = 不改） */
+  content?: string;
+  /** 追加到正文前面（批量加标记用） */
+  prepend?: string;
+}
+
+/** 批量改一组记录：共用属性走一条 UPDATE，标签逐条补 */
+export async function batchUpdateEntries(ids: number[], patch: BatchPatch): Promise<number> {
+  if (ids.length === 0) return 0;
+  const database = await db();
+  const params: (string | number | null)[] = [];
+  const sets: string[] = [];
+
+  if (patch.date !== undefined) {
+    params.push(patch.date);
+    sets.push(`date = ${params.length}`);
+    params.push(patch.date ? "completed" : "pending");
+    sets.push(`status = ${params.length}`);
+  }
+  if (patch.pinned !== undefined) {
+    params.push(patch.pinned ? 1 : 0);
+    sets.push(`pinned = ${params.length}`);
+  }
+  if (patch.dueAt !== undefined) {
+    params.push(patch.dueAt);
+    sets.push(`due_at = ${params.length}`);
+  }
+  if (patch.remindAt !== undefined) {
+    params.push(patch.remindAt);
+    sets.push(`remind_at = ${params.length}`);
+  }
+  if (patch.content) {
+    params.push(patch.content);
+    sets.push(`content = ${params.length}`);
+  }
+  if (patch.prepend) {
+    params.push(patch.prepend);
+    sets.push(`content = ${params.length} || content`);
+  }
+
+  const idPlaceholders = ids
+    .map((id) => {
+      params.push(id);
+      return `${params.length}`;
+    })
+    .join(", ");
+
+  if (sets.length > 0) {
+    await database.execute(`UPDATE entries SET ${sets.join(", ")} WHERE id IN (${idPlaceholders})`, params);
+  }
+  for (const name of patch.addTags ?? []) {
+    if (!name.trim()) continue;
+    for (const id of ids) await addEntryTag(id, name);
+  }
+  return ids.length;
+}
+
+/** 删除一条记录（连同它的标签关联） */
+export async function deleteEntry(entryId: number): Promise<void> {
+  const database = await db();
+  await database.execute("DELETE FROM entry_tags WHERE entry_id = $1", [entryId]);
+  await database.execute("DELETE FROM entries WHERE id = $1", [entryId]);
+}
+
+/** 更新一条记录（含标签整体替换） */
+export async function updateEntry(
+  entryId: number,
+  input: {
+    /** 唯一的日期时间；null = 未完成 */
+    date: string | null;
+    content: string;
+    title?: string;
+    status?: EntryStatus;
+    tags?: string[];
+    pinned?: boolean;
+    repeatRule?: string;
+    dueAt?: string | null;
+    remindAt?: string | null;
+  
+  },
+): Promise<void> {
+  const database = await db();
+  const content = input.content.trim();
+  if (!content) throw new Error("内容不能为空");
+  const custom = (input.title ?? "").trim();
+  const title = custom || content.split(/[\n；;。]/)[0].slice(0, 40);
+  await database.execute(
+    "UPDATE entries SET title = $1, content = $2, status = $3, date = $4, pinned = $5, repeat_rule = $6, due_at = $7, remind_at = $8 WHERE id = $9",
+    [
+      title,
+      content,
+      input.date ? "completed" : "pending",
+      input.date,
+      input.pinned ? 1 : 0,
+      input.repeatRule ?? "",
+      input.dueAt ?? null,
+      input.remindAt ?? null,
+      entryId,
+    ],
+  );
+  if (input.tags) {
+    await database.execute("DELETE FROM entry_tags WHERE entry_id = $1", [entryId]);
+    for (const name of input.tags) {
+      if (name.trim()) await addEntryTag(entryId, name);
+    }
+  }
+}
+
+/** 最新一条记录的日期（日历打开时用来定位到有内容的时间段） */
+export async function latestEntryDate(): Promise<string | null> {
+  const database = await db();
+  const [row] = await database.select<{ d: string | null }[]>("SELECT MAX(date) AS d FROM entries");
+  return row?.d ?? null;
+}
+
+export interface ThemeCount {
+  theme: string;
+  count: number;
+}
+
+/** 所有出现过的主题（标题里第一个冒号之前），按条数排序 */
+export async function listThemes(): Promise<ThemeCount[]> {
+  const database = await db();
+  const rows = await database.select<{ theme: string; count: number }[]>(
+    "SELECT " + THEME_SQL + " AS theme, COUNT(*) AS count FROM entries e GROUP BY theme HAVING theme <> '' ORDER BY count DESC, theme",
+  );
+  return rows.map((row) => ({ theme: row.theme, count: Number(row.count) }));
 }

@@ -17,6 +17,24 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/002_tag_links_directed.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 3,
+            description: "entry_todo_fields",
+            sql: include_str!("../migrations/003_entry_todo_fields.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 4,
+            description: "entry_completed_at",
+            sql: include_str!("../migrations/004_entry_completed_at.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 5,
+            description: "entry_single_datetime",
+            sql: include_str!("../migrations/005_entry_single_datetime.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
